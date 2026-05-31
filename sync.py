@@ -45,8 +45,24 @@ SCOPES = [
 # ─────────────────────────────────────────────────────────────────
 
 def get_google_credentials():
+    import json
+
+    # GitHub Actions → read from GOOGLE_CREDENTIALS_JSON secret
+    creds_json = os.environ.get("GOOGLE_CREDENTIALS_JSON")
+    if creds_json:
+        try:
+            creds_dict = json.loads(creds_json)
+            return Credentials.from_service_account_info(
+                creds_dict, scopes=SCOPES
+            )
+        except Exception as e:
+            print(f"❌ Could not parse GOOGLE_CREDENTIALS_JSON: {e}")
+            raise
+
+    # Local laptop → read from credentials.json file
+    creds_path = os.environ.get("GOOGLE_CREDENTIALS_PATH", "credentials.json")
     return Credentials.from_service_account_file(
-        GOOGLE_CREDENTIALS_PATH, scopes=SCOPES
+        creds_path, scopes=SCOPES
     )
 
 def connect_supabase() -> Client:
