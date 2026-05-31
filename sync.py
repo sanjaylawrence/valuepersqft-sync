@@ -1,369 +1,398 @@
-# =============================================================
+# =================================================================
 # sync.py — Valuepersqft Master Sync Script
-# =============================================================
+# =================================================================
 # THIS FILE NEVER NEEDS TO BE EDITED
 # To add new tables → edit config.py only
-# =============================================================
+# To change cleaning → edit cleaners/ files only
+#
+# HOW TO RUN:
+#   python sync.py --all                    → sync all tables
+#   python sync.py --table employees_data   → sync only employees
+#   python sync.py --table booking_data     → sync only bookings
+# =================================================================
 
-import gspread
-import openpyxl
-import io
+from dotenv import load_dotenv
+load_dotenv()
+
 import os
-import json
+import sys
+import argparse
+import importlib
+import numpy as np
+import pandas as pd
+import gspread
 from datetime import datetime
 from google.oauth2.service_account import Credentials
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaIoBaseDownload
 from supabase import create_client, Client
-from config import GOOGLE_SHEET_SOURCES, GOOGLE_DRIVE_SOURCES
+from config import GOOGLE_SHEET_SOURCES, GOOGLE_DRIVE_SOURCES, BATCH_SIZE
+from strategies.upsert import sync as upsert_sync
 
-# ─────────────────────────────────────────────
-# ENVIRONMENT VARIABLES (from GitHub Secrets)
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────
+# ENVIRONMENT VARIABLES
+# ─────────────────────────────────────────────────────────────────
 
 SUPABASE_URL            = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY            = os.environ.get("SUPABASE_KEY")
-GOOGLE_CREDENTIALS_JSON = os.environ.get("GOOGLE_CREDENTIALS_JSON")
+GOOGLE_CREDENTIALS_PATH = os.environ.get("GOOGLE_CREDENTIALS_PATH", "credentials.json")
 
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive",
 ]
 
-# ─────────────────────────────────────────────
-# CONNECTION HELPERS
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────
+# CONNECTIONS
+# ─────────────────────────────────────────────────────────────────
 
 def get_google_credentials():
-    creds_dict = json.loads(GOOGLE_CREDENTIALS_JSON)
-    return Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
+    return Credentials.from_service_account_file(
+        GOOGLE_CREDENTIALS_PATH, scopes=SCOPES
+    )
 
-def connect_to_supabase() -> Client:
+def connect_supabase() -> Client:
     return create_client(SUPABASE_URL, SUPABASE_KEY)
 
-def connect_to_sheets(creds):
+def connect_sheets(creds):
     return gspread.authorize(creds)
 
-def connect_to_drive(creds):
-    return build("drive", "v3", credentials=creds)
-
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────
 # DATA CLEANING HELPERS
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────
 
 def clean_date(value):
-    """Convert DD/MM/YYYY → YYYY-MM-DD. Returns None if empty or invalid."""
-    if not value or str(value).strip() == "":
+    if value is None:
         return None
     value = str(value).strip()
-    for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y"):
+    if value in ("", "nan", "None", "NaT"):
+        return None
+    for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y", "%d-%b-%Y", "%d %b %Y"):
         try:
             return datetime.strptime(value, fmt).strftime("%Y-%m-%d")
         except ValueError:
             continue
-    return None  # Invalid date → NULL
+    return None
 
 def clean_numeric(value):
-    """Strip commas and convert to float. Returns None if empty."""
-    if not value or str(value).strip() == "":
+    if value is None:
+        return None
+    value = str(value).strip()
+    if value in ("", "nan", "None"):
         return None
     try:
-        return float(str(value).replace(",", "").strip())
+        return float(value.replace(",", ""))
     except ValueError:
-        return None  # Invalid number → NULL
-
-def clean_text(value):
-    """Strip whitespace. Returns None if empty."""
-    if not value or str(value).strip() == "":
         return None
-    return str(value).strip()
 
-def clean_value(value, supabase_col, date_columns, numeric_columns):
-    """Clean a value based on its column type."""
-    if supabase_col in date_columns:
-        return clean_date(value)
-    elif supabase_col in numeric_columns:
-        return clean_numeric(value)
-    else:
-        return clean_text(value)
+def safe_value(value):
+    if value is None:
+        return None
+    value = str(value).strip()
+    if value in ("", "nan", "None", "NaT", "NaN"):
+        return None
+    return value
 
-# ─────────────────────────────────────────────
-# MAP A ROW USING CONFIG COLUMNS
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────
+# COLUMN MAPPING
+# ─────────────────────────────────────────────────────────────────
 
-def map_row(raw_row, column_map, date_columns, numeric_columns, missing_cols, sheet_headers):
-    """Map a raw sheet/excel row to a Supabase row using config column mapping."""
-    mapped = {}
+def apply_column_mapping(raw_df: pd.DataFrame, config: dict) -> pd.DataFrame:
+    column_map   = config["columns"]
+    date_cols    = config.get("date_columns", [])
+    numeric_cols = config.get("numeric_columns", [])
+    mapped       = {}
+
     for sheet_col, supabase_col in column_map.items():
-
-        # Check if column exists in the source
-        if sheet_col not in sheet_headers:
-            if sheet_col not in missing_cols:
-                missing_cols.add(sheet_col)  # Track once, warn once
-            mapped[supabase_col] = None
+        if sheet_col not in raw_df.columns:
+            print(f"    ⚠️  Column '{sheet_col}' not found — set to NULL")
+            mapped[supabase_col] = [None] * len(raw_df)
             continue
 
-        raw_value = raw_row.get(sheet_col, "")
-        mapped[supabase_col] = clean_value(raw_value, supabase_col, date_columns, numeric_columns)
+        if supabase_col in date_cols:
+            mapped[supabase_col] = raw_df[sheet_col].apply(clean_date)
+        elif supabase_col in numeric_cols:
+            mapped[supabase_col] = raw_df[sheet_col].apply(clean_numeric)
+        else:
+            mapped[supabase_col] = raw_df[sheet_col].apply(safe_value)
 
-    return mapped
+    return pd.DataFrame(mapped, index=raw_df.index)
 
-# ─────────────────────────────────────────────
-# SYNC ONE GOOGLE SHEET TABLE
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────
+# LOAD CLEANER
+# ─────────────────────────────────────────────────────────────────
 
-def sync_sheet_table(config, sheets_client, supabase):
+def load_cleaner(cleaner_name: str):
+    if not cleaner_name:
+        return None
+    try:
+        return importlib.import_module(f"cleaners.{cleaner_name}")
+    except ModuleNotFoundError:
+        print(f"    ⚠️  No cleaner found for '{cleaner_name}' — skipping")
+        return None
+
+# ─────────────────────────────────────────────────────────────────
+# READ GOOGLE SHEET — HANDLES EMPTY/DUPLICATE HEADERS
+# ─────────────────────────────────────────────────────────────────
+
+def read_sheet(sheets_client, sheet_name, sheet_tab=None):
+    """
+    Read Google Sheet safely.
+    Handles empty trailing columns and duplicate headers.
+    Supports specific sheet tabs.
+    """
+    if sheet_tab:
+        sheet = sheets_client.open(sheet_name).worksheet(sheet_tab)
+    else:
+        sheet = sheets_client.open(sheet_name).sheet1
+    all_values = sheet.get_all_values()
+
+    if not all_values:
+        return []
+
+    headers = all_values[0]
+
+    # Remove empty trailing columns
+    while headers and not str(headers[-1]).strip():
+        headers = headers[:-1]
+
+    # Make all headers unique
+    seen           = {}
+    unique_headers = []
+    for h in headers:
+        h = str(h).strip()
+        if h in seen:
+            seen[h] += 1
+            unique_headers.append(f"{h}_{seen[h]}")
+        else:
+            seen[h] = 0
+            unique_headers.append(h)
+
+    # Build records — skip fully empty rows
+    raw_data = []
+    for row in all_values[1:]:
+        if not any(str(v).strip() for v in row):
+            continue
+        row = list(row)[:len(unique_headers)]
+        while len(row) < len(unique_headers):
+            row.append("")
+        raw_data.append(dict(zip(unique_headers, row)))
+
+    return raw_data
+
+# ─────────────────────────────────────────────────────────────────
+# SYNC GOOGLE SHEET TABLE
+# ─────────────────────────────────────────────────────────────────
+
+def sync_sheet_table(config: dict, sheets_client, supabase) -> dict:
+
     sheet_name   = config["sheet_name"]
     table_name   = config["table_name"]
     primary_key  = config["primary_key"]
-    column_map   = config["columns"]
-    date_cols    = config.get("date_columns", [])
-    numeric_cols = config.get("numeric_columns", [])
+    cleaner_name = config.get("cleaner", "")
 
-    print(f"\n  📄 Connecting to sheet: '{sheet_name}'")
-
+    sheet_tab = config.get("sheet_tab", None)
+    tab_info  = f" → tab: '{sheet_tab}'" if sheet_tab else ""
+    print(f"\n  📄 Reading sheet: '{sheet_name}'{tab_info}")
     try:
-        sheet = sheets_client.open(sheet_name).sheet1
+        raw_data = read_sheet(sheets_client, sheet_name, sheet_tab)
     except Exception as e:
-        print(f"  ❌ Could not open sheet '{sheet_name}': {e}")
-        return 0, 0, 1
+        print(f"  ❌ Could not open sheet: {e}")
+        return {"total": 0, "inserted": 0, "altered": 0,
+                "unchanged": 0, "soft_deleted": 0, "failed": 1}
 
-    all_rows = sheet.get_all_records()
-    if not all_rows:
-        print(f"  ⚠️  Sheet '{sheet_name}' is empty — skipping")
-        return 0, 0, 0
+    if not raw_data:
+        print(f"  ⚠️  Sheet is empty — skipping")
+        return {"total": 0, "inserted": 0, "altered": 0,
+                "unchanged": 0, "soft_deleted": 0, "failed": 0}
 
-    sheet_headers = list(all_rows[0].keys()) if all_rows else []
-    missing_cols  = set()
-    success = 0
-    warnings = 0
-    failed = 0
+    raw_df = pd.DataFrame(raw_data)
+    print(f"  📊 {len(raw_df)} rows found")
 
-    for i, row in enumerate(all_rows, start=2):
-        primary_value = clean_text(row.get(
-            next((k for k, v in column_map.items() if v == primary_key), ""), ""
-        ))
+    # ── For tables with generated primary keys ─────────────────
+    # booking_data: primary key = booking_date + associate_name
+    if table_name == "booking_data" and primary_key == "booking_id":
+        date_col = config["columns"].get("Booking Date", "")
+        name_col = config["columns"].get("Associate name", "")
+        if date_col and name_col:
+            raw_df["booking_id_temp"] = (
+                raw_df.get("Booking Date", pd.Series([""] * len(raw_df)))\
+                    .astype(str).str.strip()
+                + "_"
+                + raw_df.get("Associate name ", pd.Series([""] * len(raw_df)))\
+                    .astype(str).str.strip()
+            )
 
-        if not primary_value:
-            print(f"  ⚠️  Row {i} — Skipped (no primary key value)")
-            warnings += 1
-            continue
-
-        try:
-            mapped = map_row(row, column_map, date_cols, numeric_cols, missing_cols, sheet_headers)
-            supabase.table(table_name).upsert(mapped, on_conflict=primary_key).execute()
-            full_name = mapped.get("full_name") or mapped.get(primary_key, "")
-            print(f"  ✅ Row {i} — {primary_value} | {full_name} — Synced")
-            success += 1
-        except Exception as e:
-            print(f"  ❌ Row {i} — {primary_value} — FAILED: {e}")
-            failed += 1
-
-    # Warn about missing columns once
-    for col in missing_cols:
-        print(f"  ⚠️  WARNING: Column '{col}' not found in sheet '{sheet_name}' — set to NULL")
-        warnings += 1
-
-    return success, warnings, failed
-
-# ─────────────────────────────────────────────
-# SYNC ONE GOOGLE DRIVE EXCEL TABLE
-# ─────────────────────────────────────────────
-
-def get_latest_excel_from_folder(drive_service, folder_name):
-    """Find the most recently uploaded Excel file in a Drive folder."""
-
-    # Find folder ID
-    folder_query = f"name='{folder_name}' and mimeType='application/vnd.google-apps.folder' and trashed=false"
-    folders = drive_service.files().list(q=folder_query, fields="files(id, name)").execute()
-
-    if not folders["files"]:
-        print(f"  ❌ Folder '{folder_name}' not found in Google Drive")
-        return None
-
-    folder_id = folders["files"][0]["id"]
-
-    # Get latest Excel file from folder
-    file_query = (
-        f"'{folder_id}' in parents and trashed=false and "
-        f"mimeType='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'"
+    # ── Find primary key sheet column ─────────────────────────
+    sheet_pk_col = next(
+        (k for k, v in config["columns"].items() if v == primary_key), None
     )
-    files = drive_service.files().list(
-        q=file_query,
-        orderBy="modifiedTime desc",
-        fields="files(id, name, modifiedTime)",
-        pageSize=1
-    ).execute()
 
-    if not files["files"]:
-        print(f"  ⚠️  No Excel files found in folder '{folder_name}' — skipping")
-        return None
+    # ── Map columns ────────────────────────────────────────────
+    print(f"  🔄 Mapping {len(config['columns'])} columns...")
+    df = apply_column_mapping(raw_df, config)
 
-    latest_file = files["files"][0]
-    print(f"  📂 Latest file: '{latest_file['name']}' (modified: {latest_file['modifiedTime'][:10]})")
-    return latest_file["id"]
+    # ── Generate booking_id after mapping ──────────────────────
+    if table_name == "booking_data" and primary_key == "booking_id":
+        df["booking_id"] = (
+            df.get("booking_date", pd.Series([""] * len(df))).astype(str).str.strip()
+            + "_"
+            + df.get("associate_name", pd.Series([""] * len(df))).astype(str).str.strip()
+            + "_"
+            + df.get("customer_number", pd.Series([""] * len(df))).astype(str).str.strip()
+        )
+        df["booking_id"] = df["booking_id"].apply(
+            lambda x: None if x in ("_", "None_None_None", "") else x
+        )
+    # ── Drop rows with empty primary key ──────────────────────
+    if primary_key in df.columns:
+        df = df[df[primary_key].notna()]
+        df = df[df[primary_key].astype(str).str.strip() != ""]
 
-def read_excel_from_drive(drive_service, file_id):
-    """Download and read Excel file from Drive into memory."""
-    request = drive_service.files().get_media(fileId=file_id)
-    buffer = io.BytesIO()
-    downloader = MediaIoBaseDownload(buffer, request)
-    done = False
-    while not done:
-        _, done = downloader.next_chunk()
-    buffer.seek(0)
-    wb = openpyxl.load_workbook(buffer, data_only=True)
-    ws = wb.active
+    print(f"  ✅ {len(df)} valid rows ready")
 
-    rows = list(ws.iter_rows(values_only=True))
-    if not rows:
-        return []
+    # ── Apply cleaner ──────────────────────────────────────────
+    cleaner = load_cleaner(cleaner_name)
+    if cleaner:
+        try:
+            df = cleaner.clean(df, supabase)
+        except TypeError:
+            df = cleaner.clean(df)
 
-    headers = [str(h).strip() if h else "" for h in rows[0]]
-    result = []
-    for row in rows[1:]:
-        result.append({headers[i]: (row[i] if row[i] is not None else "") for i in range(len(headers))})
+    # ── Remove NaN values before pushing ─────────────────────
+    df = df.replace({np.nan: None, float('inf'): None, float('-inf'): None})
+    df = df.where(pd.notnull(df), None)
+
+    # ── Upsert + Soft Delete ───────────────────────────────────
+    config["batch_size"] = BATCH_SIZE
+    result = upsert_sync(df, config, supabase)
     return result
 
-def sync_drive_table(config, drive_service, supabase):
-    folder_name  = config["folder_name"]
+# ─────────────────────────────────────────────────────────────────
+# SYNC GOOGLE DRIVE TABLE
+# ─────────────────────────────────────────────────────────────────
+
+def sync_drive_table(config: dict, creds, sheets_client, supabase) -> dict:
+
     table_name   = config["table_name"]
-    primary_key  = config["primary_key"]
-    column_map   = config["columns"]
-    date_cols    = config.get("date_columns", [])
-    numeric_cols = config.get("numeric_columns", [])
+    cleaner_name = config.get("cleaner", "")
 
-    print(f"\n  📂 Scanning Drive folder: '{folder_name}'")
+    print(f"\n  📂 Processing Drive table: '{table_name}'")
 
-    file_id = get_latest_excel_from_folder(drive_service, folder_name)
-    if not file_id:
-        return 0, 0, 1
+    cleaner = load_cleaner(cleaner_name)
+    if not cleaner:
+        print(f"  ❌ No cleaner found for '{cleaner_name}'")
+        return {"total": 0, "inserted": 0, "altered": 0,
+                "unchanged": 0, "soft_deleted": 0, "failed": 1}
 
     try:
-        all_rows = read_excel_from_drive(drive_service, file_id)
+        df = cleaner.clean(pd.DataFrame(), creds, sheets_client, supabase)
     except Exception as e:
-        print(f"  ❌ Could not read Excel file: {e}")
-        return 0, 0, 1
+        print(f"  ❌ Cleaner failed: {e}")
+        import traceback
+        traceback.print_exc()
+        return {"total": 0, "inserted": 0, "altered": 0,
+                "unchanged": 0, "soft_deleted": 0, "failed": 1}
 
-    if not all_rows:
-        print(f"  ⚠️  Excel file is empty — skipping")
-        return 0, 0, 0
+    if df.empty:
+        print(f"  ⚠️  No data returned from cleaner")
+        return {"total": 0, "inserted": 0, "altered": 0,
+                "unchanged": 0, "soft_deleted": 0, "failed": 0}
 
-    sheet_headers = list(all_rows[0].keys()) if all_rows else []
-    missing_cols  = set()
-    success = 0
-    warnings = 0
-    failed = 0
+    print(f"  ✅ {len(df)} rows cleaned and ready")
+    config["batch_size"] = BATCH_SIZE
+    result = upsert_sync(df, config, supabase)
+    return result
 
-    for i, row in enumerate(all_rows, start=2):
-        primary_value = clean_text(str(row.get(
-            next((k for k, v in column_map.items() if v == primary_key), ""), ""
-        )))
-
-        if not primary_value:
-            print(f"  ⚠️  Row {i} — Skipped (no primary key value)")
-            warnings += 1
-            continue
-
-        try:
-            mapped = map_row(row, column_map, date_cols, numeric_cols, missing_cols, sheet_headers)
-            supabase.table(table_name).upsert(mapped, on_conflict=primary_key).execute()
-            print(f"  ✅ Row {i} — {primary_value} — Synced")
-            success += 1
-        except Exception as e:
-            print(f"  ❌ Row {i} — {primary_value} — FAILED: {e}")
-            failed += 1
-
-    for col in missing_cols:
-        print(f"  ⚠️  WARNING: Column '{col}' not found in Excel file — set to NULL")
-        warnings += 1
-
-    return success, warnings, failed
-
-# ─────────────────────────────────────────────
-# MAIN — RUNS ALL TABLES
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────
+# MAIN
+# ─────────────────────────────────────────────────────────────────
 
 def main():
-    start_time = datetime.now()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--all",   action="store_true")
+    parser.add_argument("--table", type=str)
+    args = parser.parse_args()
 
-    print("\n" + "="*60)
-    print(f"🚀 VALUEPERSQFT SYNC STARTED — {start_time.strftime('%d/%m/%Y %H:%M:%S')}")
-    print("="*60)
+    if args.all:
+        sheet_tables = GOOGLE_SHEET_SOURCES
+        drive_tables = GOOGLE_DRIVE_SOURCES
+    elif args.table:
+        sheet_tables = [c for c in GOOGLE_SHEET_SOURCES if c["table_name"] == args.table]
+        drive_tables = [c for c in GOOGLE_DRIVE_SOURCES if c["table_name"] == args.table]
+        if not sheet_tables and not drive_tables:
+            print(f"❌ Table '{args.table}' not found in config.py")
+            sys.exit(1)
+    else:
+        print("❌ Please use --all or --table <table_name>")
+        print("   Example: python sync.py --all")
+        print("   Example: python sync.py --table employees_data")
+        print("   Example: python sync.py --table booking_data")
+        sys.exit(1)
 
-    # Connect once — reuse for all tables
-    creds        = get_google_credentials()
-    supabase     = connect_to_supabase()
-    sheets_client = connect_to_sheets(creds)
+    start_time   = datetime.now()
+    total_tables = len(sheet_tables) + len(drive_tables)
 
-    # Only connect to Drive if there are Drive sources configured
-    drive_service = connect_to_drive(creds) if GOOGLE_DRIVE_SOURCES else None
+    print("\n" + "=" * 60)
+    print(f"🚀 VALUEPERSQFT SYNC STARTED")
+    print(f"   {start_time.strftime('%d/%m/%Y %H:%M:%S')}")
+    print(f"   Tables to sync: {total_tables}")
+    print("=" * 60)
 
-    total_tables  = len(GOOGLE_SHEET_SOURCES) + len(GOOGLE_DRIVE_SOURCES)
+    creds         = get_google_credentials()
+    supabase      = connect_supabase()
+    sheets_client = connect_sheets(creds)
     results       = []
 
-    # ── SYNC GOOGLE SHEET TABLES ─────────────────────────────
-    for idx, config in enumerate(GOOGLE_SHEET_SOURCES, start=1):
-        print(f"\n{'─'*60}")
+    # ── Sync Google Sheet tables ───────────────────────────────
+    for idx, config in enumerate(sheet_tables, start=1):
+        print(f"\n{'─' * 60}")
         print(f"📋 TABLE {idx}/{total_tables} — {config['sheet_name']} → {config['table_name']}")
-        print(f"{'─'*60}")
+        print(f"{'─' * 60}")
+        result          = sync_sheet_table(config, sheets_client, supabase)
+        result["table"] = config["table_name"]
+        results.append(result)
 
-        success, warnings, failed = sync_sheet_table(config, sheets_client, supabase)
-        results.append({
-            "table"    : config["table_name"],
-            "source"   : config["sheet_name"],
-            "success"  : success,
-            "warnings" : warnings,
-            "failed"   : failed,
-        })
+    # ── Sync Google Drive tables ───────────────────────────────
+    for idx, config in enumerate(drive_tables, start=len(sheet_tables) + 1):
+        print(f"\n{'─' * 60}")
+        print(f"📋 TABLE {idx}/{total_tables} — Drive → {config['table_name']}")
+        print(f"{'─' * 60}")
+        result          = sync_drive_table(config, creds, sheets_client, supabase)
+        result["table"] = config["table_name"]
+        results.append(result)
 
-    # ── SYNC GOOGLE DRIVE / EXCEL TABLES ─────────────────────
-    for idx, config in enumerate(GOOGLE_DRIVE_SOURCES, start=len(GOOGLE_SHEET_SOURCES) + 1):
-        print(f"\n{'─'*60}")
-        print(f"📋 TABLE {idx}/{total_tables} — {config['folder_name']} → {config['table_name']}")
-        print(f"{'─'*60}")
+    # ── Final Summary ──────────────────────────────────────────
+    end_time = datetime.now()
+    duration = round((end_time - start_time).total_seconds())
 
-        success, warnings, failed = sync_drive_table(config, drive_service, supabase)
-        results.append({
-            "table"    : config["table_name"],
-            "source"   : config["folder_name"],
-            "success"  : success,
-            "warnings" : warnings,
-            "failed"   : failed,
-        })
-
-    # ── FINAL SUMMARY ─────────────────────────────────────────
-    end_time  = datetime.now()
-    duration  = (end_time - start_time).seconds
-
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print("📋 FINAL SUMMARY")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
+    print(f"  {'TABLE':<25} {'INSERTED':<10} {'ALTERED':<10} {'UNCHANGED':<10} {'DELETED':<10} {'FAILED':<10}")
+    print(f"  {'─'*25} {'─'*10} {'─'*10} {'─'*10} {'─'*10} {'─'*10}")
 
     for r in results:
-        status = "✅" if r["failed"] == 0 else "❌"
+        status = "✅" if r.get("failed", 0) == 0 else "❌"
         print(
-            f"  {status} {r['table']:<25} "
-            f"Synced: {r['success']:<5} "
-            f"Warnings: {r['warnings']:<5} "
-            f"Failed: {r['failed']}"
+            f"  {status} {r['table']:<23} "
+            f"{r.get('inserted', 0):<10} "
+            f"{r.get('altered', 0):<10} "
+            f"{r.get('unchanged', 0):<10} "
+            f"{r.get('soft_deleted', 0):<10} "
+            f"{r.get('failed', 0):<10}"
         )
 
-    total_success  = sum(r["success"] for r in results)
-    total_warnings = sum(r["warnings"] for r in results)
-    total_failed   = sum(r["failed"] for r in results)
+    print(f"{'─' * 60}")
+    print(f"  Total inserted  : {sum(r.get('inserted', 0) for r in results)}")
+    print(f"  Total altered   : {sum(r.get('altered', 0) for r in results)}")
+    print(f"  Total unchanged : {sum(r.get('unchanged', 0) for r in results)}")
+    print(f"  Total deleted   : {sum(r.get('soft_deleted', 0) for r in results)}")
+    print(f"  Total failed    : {sum(r.get('failed', 0) for r in results)}")
+    print(f"  Time taken      : {duration} seconds")
+    print(f"  Completed at    : {end_time.strftime('%d/%m/%Y %H:%M:%S')}")
+    print(f"{'=' * 60}\n")
 
-    print(f"{'─'*60}")
-    print(f"  Total rows synced  : {total_success}")
-    print(f"  Total warnings     : {total_warnings}")
-    print(f"  Total failed       : {total_failed}")
-    print(f"  Time taken         : {duration} seconds")
-    print(f"  Completed at       : {end_time.strftime('%d/%m/%Y %H:%M:%S')}")
-    print(f"{'='*60}\n")
-
-    # Exit with error code if any failures (so GitHub Actions marks run as failed)
-    if total_failed > 0:
-        exit(1)
+    if any(r.get("failed", 0) > 0 for r in results):
+        sys.exit(1)
 
 
 if __name__ == "__main__":

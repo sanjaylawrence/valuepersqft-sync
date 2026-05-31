@@ -2,4 +2,10 @@ gspread==6.1.2
 google-auth==2.29.0
 google-api-python-client==2.126.0
 supabase==2.4.6
+pandas==2.2.2
 openpyxl==3.1.2
+python-dotenv==1.0.1
+pygsheets==2.0.6
+thefuzz==0.22.1
+python-Levenshtein==0.25.2
+ 

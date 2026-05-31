@@ -1,9 +1,9 @@
-name: Valuepersqft — Sync All Tables
+name: Sync Booking Data Only
 
 on:
-  schedule:
-    - cron: "*/30 * * * *"   # Runs every 30 minutes automatically
-  workflow_dispatch:          # Allows manual run from GitHub anytime
+  workflow_dispatch:        # Manual run from GitHub
+  # schedule:
+  #   - cron: "0 */2 * * *"  # Uncomment to auto run
 
 jobs:
   sync:
@@ -21,9 +21,10 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Run master sync script
+      - name: Run sync — Booking Data Only
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
-        run: python sync.py
+        run: python sync.py --table booking_data
+        

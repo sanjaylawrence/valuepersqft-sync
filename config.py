@@ -1,35 +1,44 @@
-# =============================================================
-# config.py — Valuepersqft DB Sync Configuration
-# =============================================================
+# =================================================================
+# config.py — Valuepersqft Sync Configuration
+# =================================================================
 # HOW TO ADD A NEW GOOGLE SHEET TABLE:
-#   1. Copy one block from GOOGLE_SHEET_SOURCES
+#   1. Copy one block below
 #   2. Fill in sheet_name, table_name, primary_key, columns
-#   3. Push to GitHub — sync.py handles the rest automatically
+#   3. Add cleaner file in cleaners/ folder
+#   4. That's it — sync.py handles everything automatically
 #
-# HOW TO ADD A NEW EXCEL/FOLDER TABLE:
-#   1. Copy one block from GOOGLE_DRIVE_SOURCES
+# HOW TO ADD A NEW GOOGLE DRIVE TABLE:
+#   1. Copy one block from GOOGLE_DRIVE_SOURCES below
 #   2. Fill in folder_name, table_name, primary_key, columns
-#   3. Push to GitHub — sync.py handles the rest automatically
+#   3. Add cleaner file in cleaners/ folder
+#   4. That's it — sync.py handles everything automatically
 #
 # COLUMN MAPPING FORMAT:
 #   "Google Sheet Column Name" : "supabase_column_name"
-# =============================================================
+# =================================================================
 
 
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────
 # GOOGLE SHEET SOURCES
-# Add all Google Sheet → Supabase mappings here
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────
 
 GOOGLE_SHEET_SOURCES = [
 
-    # ── TABLE 1: Employee Data ──────────────────────────────
+    # ── TABLE 1: Employee Data ───────────────────────────────────
     {
-        "sheet_name"  : "Employee data (DB)",   # Exact Google Sheet name
-        "table_name"  : "employees",            # Exact Supabase table name
-        "primary_key" : "employee_code",        # Supabase primary key column
+        # Google Sheet exact name
+        "sheet_name"  : "Employee data (DB)",
 
-        # Format → "Google Sheet Column" : "supabase_column"
+        # Supabase table exact name
+        "table_name"  : "employees_data",
+
+        # Unique column used for upsert + soft delete
+        "primary_key" : "employee_code",
+
+        # Cleaner file name inside cleaners/ folder
+        "cleaner"     : "employees",
+
+        # Column mapping → "Sheet Column" : "supabase_column"
         "columns": {
             "Employee Code"        : "employee_code",
             "Full name"            : "full_name",
@@ -51,7 +60,7 @@ GOOGLE_SHEET_SOURCES = [
             "Old CTC"              : "old_ctc",
         },
 
-        # Which Supabase columns are DATE type (will be converted from DD/MM/YYYY)
+        # Date columns → will be converted from DD/MM/YYYY to YYYY-MM-DD
         "date_columns": [
             "date_of_birth",
             "date_of_joining",
@@ -60,7 +69,7 @@ GOOGLE_SHEET_SOURCES = [
             "date_of_leaving",
         ],
 
-        # Which Supabase columns are NUMERIC type (will strip commas, convert to number)
+        # Numeric columns → commas removed, converted to float
         "numeric_columns": [
             "monthly_ctc",
             "yearly_ctc",
@@ -68,49 +77,105 @@ GOOGLE_SHEET_SOURCES = [
         ],
     },
 
-    # ── TABLE 2: Sales (ADD WHEN READY) ─────────────────────
-    # {
-    #     "sheet_name"  : "Sales (DB)",
-    #     "table_name"  : "sales",
-    #     "primary_key" : "sale_id",
-    #     "columns": {
-    #         "Sale ID"   : "sale_id",
-    #         "Sale Date" : "sale_date",
-    #         # Add all columns here...
-    #     },
-    #     "date_columns"    : ["sale_date"],
-    #     "numeric_columns" : ["amount"],
-    # },
 
-    # ── TABLE 3: Team Structure (ADD WHEN READY) ─────────────
-    # {
-    #     "sheet_name"  : "Team Structure (DB)",
-    #     "table_name"  : "team_structure",
-    #     "primary_key" : "employee_code",
-    #     "columns": {
-    #         # Add all columns here...
-    #     },
-    #     "date_columns"    : [],
-    #     "numeric_columns" : [],
-    # },
+    # ── TABLE 2: Booking Data ────────────────────────────────────
+    {
+        "sheet_name"  : "Booking_data_DB",
+        "table_name"  : "booking_data",
+        "primary_key" : "booking_id",
+        "cleaner"     : "booking",
 
-    # ── TABLE 4: Associate SV (ADD WHEN READY) ───────────────
-    # {
-    #     "sheet_name"  : "Associate SV (DB)",
-    #     "table_name"  : "associate_sv",
-    #     "primary_key" : "associate_id",
-    #     "columns": {
-    #         # Add all columns here...
-    #     },
-    #     "date_columns"    : [],
-    #     "numeric_columns" : [],
-    # },
+        "columns": {
+            "Booking Month"          : "booking_month",
+            "Associate name"         : "associate_name",
+            "Team Leader"            : "team_leader",
+            "AGM"                    : "agm",
+            "Booking Date"           : "booking_date",
+            "Customer Name"          : "customer_name",
+            "Customer Number"        : "customer_number",
+            "Booking Project"        : "booking_project",
+            "Agreement value"        : "agreement_value",
+            "RTC"                    : "rtc",
+            "RTC (Management)"       : "rtc_management",
+            "RTC (Organisation)"     : "rtc_organisation",
+            "Outflow"                : "outflow",
+            "Sales Done"             : "sales_done",
+            "Revenue"                : "revenue",
+            "Revenue (Management)"   : "revenue_management",
+            "Revenue (Organisation)" : "revenue_organisation",
+            "LEAD PROJECT"           : "lead_project",
+            "LEAD DATE"              : "lead_date",
+            "LEAD SOURCE"            : "lead_source",
+            "LEAD MONTH"             : "lead_month",
+            "Status"                 : "status",
+            "Week"                   : "week",
+        },
 
-    # ── TABLE 5: Monthly Campaign (ADD WHEN READY) ───────────
+        "date_columns"    : ["booking_date", "lead_date"],
+        "numeric_columns" : [
+            "agreement_value", "rtc", "rtc_management", "rtc_organisation",
+            "outflow", "sales_done", "revenue", "revenue_management",
+            "revenue_organisation"
+        ],
+    },
+
+
+    # ── TABLE 3: Team Structure ──────────────────────────────────
+    {
+        "sheet_name"  : "Booking_data_DB",
+        "sheet_tab"   : "Team_structure",
+        "table_name"  : "team_structure",
+        "primary_key" : "team_id",
+        "cleaner"     : "team_structure",
+
+        "columns": {
+            "Month"            : "month",
+            "GM"               : "gm",
+            "AGM"              : "agm",
+            "TL Name"          : "tl_name",
+            "Associate Name"   : "associate_name",
+            "Project Tagged"   : "project_tagged",
+            "Project Tagged 2" : "project_tagged_2",
+            "Project Tagged 3" : "project_tagged_3",
+            "Status"           : "status",
+            "DOJ"              : "doj",
+            "DOL"              : "dol",
+        },
+
+        "date_columns"    : ["doj", "dol"],
+        "numeric_columns" : [],
+    },
+
+
+    # ── TABLE 4: Associate SV Data ──────────────────────────────
+    {
+        "sheet_name"  : "Associate_SV_Data",
+        "sheet_tab"   : "Associate_sv",
+        "table_name"  : "associate_sv_data",
+        "primary_key" : "sv_id",
+        "cleaner"     : "associate_sv",
+
+        "columns": {
+            "Month"       : "month",
+            "Week"        : "week",
+            "AGM"         : "agm",
+            "Team Leader" : "team_leader",
+            "Associate"   : "associate",
+            "Visit Count" : "visit_count",
+            "Date"        : "date",
+        },
+
+        "date_columns"    : ["date"],
+        "numeric_columns" : ["visit_count"],
+    },
+
+
+    # ── TABLE 5: Monthly Campaign (ADD WHEN READY) ──────────────
     # {
     #     "sheet_name"  : "Monthly Campaign (DB)",
     #     "table_name"  : "monthly_campaign",
     #     "primary_key" : "campaign_id",
+    #     "cleaner"     : "monthly_campaign",
     #     "columns": {
     #         # Add all columns here...
     #     },
@@ -121,48 +186,55 @@ GOOGLE_SHEET_SOURCES = [
 ]
 
 
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────
 # GOOGLE DRIVE FOLDER SOURCES (Excel files)
-# Add all Google Drive Folder → Supabase mappings here
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────
 
 GOOGLE_DRIVE_SOURCES = [
 
-    # ── TABLE 6: Leads (ADD WHEN READY) ──────────────────────
-    # {
-    #     "folder_name" : "Leads",         # Exact Google Drive folder name
-    #     "table_name"  : "leads",         # Exact Supabase table name
-    #     "primary_key" : "lead_id",       # Supabase primary key column
-    #     "columns": {
-    #         "Lead ID"   : "lead_id",
-    #         # Add all columns here...
-    #     },
-    #     "date_columns"    : [],
-    #     "numeric_columns" : [],
-    # },
+    # ── TABLE 6: Leads Data ──────────────────────────────────────
+    {
+        "folder_name" : "LEADS RAW DATA",
+        "table_name"  : "leads_data",
+        "primary_key" : "lead_id",
+        "cleaner"     : "leads",
 
-    # ── TABLE 7: Call Data (ADD WHEN READY) ──────────────────
-    # {
-    #     "folder_name" : "Call Data",
-    #     "table_name"  : "call_data",
-    #     "primary_key" : "call_id",
-    #     "columns": {
-    #         # Add all columns here...
-    #     },
-    #     "date_columns"    : [],
-    #     "numeric_columns" : [],
-    # },
+        # Leads cleaner handles all column mapping internally
+        # No columns needed here — cleaner returns final DataFrame
+        "columns"         : {},
+        "date_columns"    : [],
+        "numeric_columns" : [],
+    },
 
-    # ── TABLE 8: Site Visit (ADD WHEN READY) ─────────────────
-    # {
-    #     "folder_name" : "Site Visit",
-    #     "table_name"  : "site_visit",
-    #     "primary_key" : "visit_id",
-    #     "columns": {
-    #         # Add all columns here...
-    #     },
-    #     "date_columns"    : [],
-    #     "numeric_columns" : [],
-    # },
+
+    # ── TABLE 7: Site Visit Data ─────────────────────────────────
+    {
+        "folder_name"     : "M_SV_DATA",
+        "table_name"      : "site_visit_data",
+        "primary_key"     : "sv_id",
+        "cleaner"         : "site_visit",
+        "columns"         : {},
+        "date_columns"    : [],
+        "numeric_columns" : [],
+    },
+
+
+    # ── TABLE 8: Call Data ───────────────────────────────────────
+    {
+        "folder_name"     : "CALL_REPORT",
+        "table_name"      : "call_data",
+        "primary_key"     : "call_id",
+        "cleaner"         : "call_data",
+        "columns"         : {},
+        "date_columns"    : [],
+        "numeric_columns" : [],
+    },
 
 ]
+
+
+# ─────────────────────────────────────────────────────────────────
+# BATCH SIZE — How many rows to push to Supabase at once
+# 1000 is optimal for most cases
+# ─────────────────────────────────────────────────────────────────
+BATCH_SIZE = 500
