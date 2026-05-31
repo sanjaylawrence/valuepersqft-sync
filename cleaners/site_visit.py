@@ -208,7 +208,7 @@ def remove_all_nan(df: pd.DataFrame) -> pd.DataFrame:
 # MAIN CLEAN FUNCTION
 # ─────────────────────────────────────────────────────────────────
 
-def clean(df: pd.DataFrame, creds, sheets_client) -> pd.DataFrame:
+def clean(df: pd.DataFrame, creds, sheets_client, supabase=None) -> pd.DataFrame:
 
     print("    🧹 Starting site visit data cleaning...")
 
