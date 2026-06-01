@@ -124,7 +124,7 @@ GOOGLE_SHEET_SOURCES = [
     {
         "sheet_name"  : "Booking_data_DB",
         "sheet_tab"   : "Team_structure",
-        "table_name"  : "team_structure_data",
+        "table_name"  : "team_structure",
         "primary_key" : "team_id",
         "cleaner"     : "team_structure",
 
