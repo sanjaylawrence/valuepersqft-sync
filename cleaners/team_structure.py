@@ -32,6 +32,16 @@ def safe_date(val):
         return None
 
 
+def safe_num(val):
+    if val is None:
+        return None
+    try:
+        f = float(str(val).replace(",", ""))
+        return None if np.isnan(f) else f
+    except (ValueError, TypeError):
+        return None
+
+
 def remove_all_nan(df: pd.DataFrame) -> pd.DataFrame:
     df = df.replace({np.nan: None, float('inf'): None, float('-inf'): None})
     df = df.where(pd.notnull(df), None)
@@ -67,14 +77,20 @@ def clean(df: pd.DataFrame, supabase=None) -> pd.DataFrame:
         if col in df.columns:
             df[col] = df[col].apply(safe_date)
 
-    # ── STEP 5: String columns ────────────────────────────────
+    # ── STEP 5: Numeric columns ──────────────────────────────
+    for col in ["revenue_target", "sales_target"]:
+        if col in df.columns:
+            df[col] = df[col].apply(safe_num)
+
+    # ── STEP 6: String columns ────────────────────────────────
     str_cols = [c for c in df.columns
-                if c not in ["doj", "dol", "team_id"]]
+                if c not in ["doj", "dol", "team_id",
+                              "revenue_target", "sales_target"]]
     for col in str_cols:
         if col in df.columns:
             df[col] = df[col].apply(safe_str)
 
-    # ── STEP 6: Create team_id ────────────────────────────────
+    # ── STEP 7: Create team_id ────────────────────────────────
     # Stable ID: month + tl_name + associate_name
     # No row_number — delete works correctly
     df["team_id"] = (
@@ -91,11 +107,11 @@ def clean(df: pd.DataFrame, supabase=None) -> pd.DataFrame:
         ) else x
     )
 
-    # ── STEP 7: Drop rows with no team_id ─────────────────────
+    # ── STEP 8: Drop rows with no team_id ─────────────────────
     df = df[df["team_id"].notna()]
     print(f"    ✅ Total rows ready: {len(df)}")
 
-    # ── STEP 8: Final NaN removal ─────────────────────────────
+    # ── STEP 9: Final NaN removal ─────────────────────────────
     df = remove_all_nan(df)
 
     print("    ✅ Team structure cleaned successfully")

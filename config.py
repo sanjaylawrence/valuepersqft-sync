@@ -124,7 +124,7 @@ GOOGLE_SHEET_SOURCES = [
     {
         "sheet_name"  : "Booking_data_DB",
         "sheet_tab"   : "Team_structure",
-        "table_name"  : "team_structure",
+        "table_name"  : "team_structure_data",
         "primary_key" : "team_id",
         "cleaner"     : "team_structure",
 
@@ -140,10 +140,12 @@ GOOGLE_SHEET_SOURCES = [
             "Status"           : "status",
             "DOJ"              : "doj",
             "DOL"              : "dol",
+            "Revenue Target"   : "revenue_target",
+            "Sales Target"     : "sales_target",
         },
 
         "date_columns"    : ["doj", "dol"],
-        "numeric_columns" : [],
+        "numeric_columns" : ["revenue_target", "sales_target"],
     },
 
 
@@ -162,7 +164,7 @@ GOOGLE_SHEET_SOURCES = [
             "Team Leader" : "team_leader",
             "Associate"   : "associate",
             "Visit Count" : "visit_count",
-            "Date"        : "date",
+            "date"        : "date",
         },
 
         "date_columns"    : ["date"],

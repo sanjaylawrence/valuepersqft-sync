@@ -22,5 +22,5 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
-        run: python sync.py --table team_structure
-        
+          GOOGLE_CREDENTIALS_PATH: credentials.json
+        run: python sync.py --table team_structure_data
