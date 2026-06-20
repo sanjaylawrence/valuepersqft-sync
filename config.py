@@ -142,10 +142,11 @@ GOOGLE_SHEET_SOURCES = [
             "DOL"              : "dol",
             "Revenue Target"   : "revenue_target",
             "Sales Target"     : "sales_target",
+            "Site Visit Target" : "site_visit_target",
         },
 
         "date_columns"    : ["doj", "dol"],
-        "numeric_columns" : ["revenue_target", "sales_target"],
+        "numeric_columns" : ["revenue_target", "sales_target", "site_visit_target"],
     },
 
 
@@ -172,18 +173,60 @@ GOOGLE_SHEET_SOURCES = [
     },
 
 
-    # ── TABLE 5: Monthly Campaign (ADD WHEN READY) ──────────────
-    # {
-    #     "sheet_name"  : "Monthly Campaign (DB)",
-    #     "table_name"  : "monthly_campaign",
-    #     "primary_key" : "campaign_id",
-    #     "cleaner"     : "monthly_campaign",
-    #     "columns": {
-    #         # Add all columns here...
-    #     },
-    #     "date_columns"    : [],
-    #     "numeric_columns" : [],
-    # },
+    # ── TABLE 5: Marketing Campaign Expenses ─────────────────────
+    {
+        "sheet_name"  : "Marketing Campaign Expences (DB)",
+        "sheet_tab"   : "Marketing_expences",
+        "table_name"  : "marketing_campaign_expenses_data",
+        "primary_key" : "campaign_key",
+        "cleaner"     : "marketing_campaign_expenses",
+
+        "columns": {
+            "Month"     : "month",
+            "Campaigns" : "campaigns",
+            "Platform"  : "platform",
+            "Budget"    : "budget",
+            "Spend"     : "spend",
+            "Leads"     : "leads",
+            "CPL"       : "cpl",
+        },
+
+        "date_columns"    : [],
+        "numeric_columns" : ["budget", "spend", "cpl"],
+    },
+
+
+    # ── TABLE 6: Financial Incentives ────────────────────────────
+    {
+        "sheet_name"  : "Finance Incentives",
+        "sheet_tab"   : "Incentive",
+        "table_name"  : "financial_incentives_data",
+        "primary_key" : "incentive_key",
+        "cleaner"     : "financial_incentives",
+
+        "columns": {
+            "Month"                               : "month",
+            "Name"                                : "name",
+            "Position"                            : "position",
+            "Total Incentives Eligible"           : "total_incentives_eligible",
+            "Incentives Paid"                     : "incentives_paid",
+            "Incentives Payable"                  : "incentives_payable",
+            "Builder Payment Received"            : "builder_payment_received",
+            "Builder Payment Pending"             : "builder_payment_pending",
+            "Advance PSTC Payable for this month" : "advance_pstc_payable",
+            "Month - Year"                        : "month_year",
+        },
+
+        "date_columns"    : [],
+        "numeric_columns" : [
+            "total_incentives_eligible",
+            "incentives_paid",
+            "incentives_payable",
+            "builder_payment_received",
+            "builder_payment_pending",
+            "advance_pstc_payable",
+        ],
+    },
 
 ]
 

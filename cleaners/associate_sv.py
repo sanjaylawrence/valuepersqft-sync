@@ -3,8 +3,8 @@
 # =================================================================
 # Reads from Google Sheet "Associate_SV_Data" → "Associate_sv" tab
 # Simple cleaning + employee code lookup
-# Primary key = month + week + associate
-# (No row_number — delete works correctly)
+# Primary key = month + associate (monthly basis now)
+# Week column will be blank — monthly total visit count
 # =================================================================
 
 import pandas as pd
@@ -150,18 +150,18 @@ def clean(df: pd.DataFrame, supabase=None) -> pd.DataFrame:
             df[col] = df[col].apply(safe_str)
 
     # ── STEP 8: Create sv_id ──────────────────────────────────
-    # No row_number — stable ID enables correct soft delete
+    # Monthly basis — month + associate is unique
+    # Week column is blank — not used in ID
+    # Soft delete works correctly ✅
     df["sv_id"] = (
         df["month"].astype(str).str.strip()
-        + "_"
-        + df["week"].astype(str).str.strip()
         + "_"
         + df["associate"].astype(str).str.strip()
     )
 
     df["sv_id"] = df["sv_id"].apply(
         lambda x: None if str(x).strip() in (
-            "_", "__", "___", "None_None_None", ""
+            "_", "__", "None_None", ""
         ) else x
     )
 
