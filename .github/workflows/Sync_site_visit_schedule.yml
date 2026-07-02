@@ -3,8 +3,8 @@ name: Sync Site Visit Schedule
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 2 * * *'  # runs daily at 2am UTC (7:30am IST)
-
+    - cron: "0 5 * * *"      # 10:30 AM IST (5:00 AM UTC)
+    - cron: "30 12 * * *"    # 6:00 PM IST (12:30 PM UTC) 
 jobs:
   sync:
     runs-on: ubuntu-latest
