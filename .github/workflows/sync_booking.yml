@@ -3,7 +3,7 @@ name: Sync Booking Data Only
 on:
   workflow_dispatch:        # Manual run from GitHub
   schedule:
-    - cron: "0 19 * * *"  # Uncomment to auto run
+    - cron: "30 3 * * *"  # Uncomment to auto run
 
 jobs:
   sync:
