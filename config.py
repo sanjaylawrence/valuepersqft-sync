@@ -129,19 +129,19 @@ GOOGLE_SHEET_SOURCES = [
         "cleaner"     : "team_structure",
 
         "columns": {
-            "Month"            : "month",
-            "GM"               : "gm",
-            "AGM"              : "agm",
-            "TL Name"          : "tl_name",
-            "Associate Name"   : "associate_name",
-            "Project Tagged"   : "project_tagged",
-            "Project Tagged 2" : "project_tagged_2",
-            "Project Tagged 3" : "project_tagged_3",
-            "Status"           : "status",
-            "DOJ"              : "doj",
-            "DOL"              : "dol",
-            "Revenue Target"   : "revenue_target",
-            "Sales Target"     : "sales_target",
+            "Month"             : "month",
+            "GM"                : "gm",
+            "AGM"               : "agm",
+            "TL Name"           : "tl_name",
+            "Associate Name"    : "associate_name",
+            "Project Tagged"    : "project_tagged",
+            "Project Tagged 2"  : "project_tagged_2",
+            "Project Tagged 3"  : "project_tagged_3",
+            "Status"            : "status",
+            "DOJ"               : "doj",
+            "DOL"               : "dol",
+            "Revenue Target"    : "revenue_target",
+            "Sales Target"      : "sales_target",
             "Site Visit Target" : "site_visit_target",
         },
 
@@ -226,6 +226,35 @@ GOOGLE_SHEET_SOURCES = [
             "builder_payment_pending",
             "advance_pstc_payable",
         ],
+    },
+
+
+    # ── TABLE 7: Site Visit Schedule ─────────────────────────────
+    {
+        "sheet_name"  : "Site Visit Form — Valuepersqft (Responses)",
+        "sheet_tab"   : "Form Responses 1",
+        "table_name"  : "site_visit_schedule",
+        "primary_key" : "sv_schedule_key",
+        "cleaner"     : "site_visit_schedule",
+
+        "columns": {
+            "Timestamp"          : "timestamp",
+            "Today's Date"       : "today_date",
+            "Associate"          : "associate",
+            "Team Leader"        : "team_leader",
+            "AGM"                : "agm",
+            "Site Visit Date"    : "site_visit_date",
+            "Client Name"        : "client_name",
+            "Client Number"      : "client_number",
+            "Site Visit Slot"    : "site_visit_slot",
+            "Client Status"      : "client_status",
+            "Type of Site Visit" : "type_of_site_visit",
+            "Project Name"       : "project_name",
+            "Lead/Data"          : "lead_data",
+        },
+
+        "date_columns"    : ["today_date", "site_visit_date"],
+        "numeric_columns" : [],
     },
 
 ]
